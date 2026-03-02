@@ -1,0 +1,15 @@
+aiohttp
+aiortc
+opencv-python
+mediapipe
+scipy
+aiohttp_jinja2
+fer
+imutils
+python-dotenv
+clarifai-grpc
+openai
+tensorflow
+motor
+ultralytics
+tensorflow-hub

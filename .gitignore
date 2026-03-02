@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak
+venv.bak
+
+# SSL Certificates
+cert.pem
+key.pem
+
+# Models and large binaries
+yolov8n.pt
+ffmpeg/
+*.mp4
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Application logs and data
+static/videos/
+*.log
+!static/videos/.gitkeep
