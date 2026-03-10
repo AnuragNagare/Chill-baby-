@@ -66,14 +66,27 @@ function generateUUID() {
 
 OPENWEATHER_KEY = "" // REMOVED FOR GITHUB PUSH - Add your key here
 async function fetchWeatherData() {
-    const response = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=Las+Vegas&appid=${OPENWEATHER_KEY}`);
-    console.log("weather response", response)
-    const data = await response.json();
-    const tempInKelvin = data.main.temp;
-    const tempInCelsius = tempInKelvin - 273.15;
-    // document.getElementById("LosTemp").innerHTML = `Temperature: ${tempInCelsius.toFixed(2)}°C`;  
-    document.getElementById("LosTemp").innerHTML = `Temperature: ${Math.round(tempInCelsius)}°C`;
+    // If no key is provided, don't even try to fetch to avoid console errors
+    if (!OPENWEATHER_KEY) {
+        console.warn("OpenWeather API key is missing. Weather display disabled.");
+        document.getElementById("LosTemp").innerHTML = `Temp: --°C`;
+        return;
+    }
 
+    try {
+        const response = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=Las+Vegas&appid=${OPENWEATHER_KEY}`);
+        const data = await response.json();
+
+        if (data && data.main && data.main.temp !== undefined) {
+            const tempInCelsius = data.main.temp - 273.15;
+            document.getElementById("LosTemp").innerHTML = `Temperature: ${Math.round(tempInCelsius)}°C`;
+        } else {
+            document.getElementById("LosTemp").innerHTML = `Temp: --°C`;
+        }
+    } catch (err) {
+        console.error("Weather fetch failed:", err);
+        document.getElementById("LosTemp").innerHTML = `Temp: --°C`;
+    }
 
     // Fetch the weather data again in one hour  
     setTimeout(fetchWeatherData, 60 * 60 * 1000);
