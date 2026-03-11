@@ -119,70 +119,40 @@ function updateTime() {
 function startProcessing() {
     console.log("start processing")
 
-    console.log(food_intol_array)
-    ///////////// 1.egg  2.fish  3.shellfish  4.nut 5.dairy  6.soy
-
     if (food_intol_array.includes("dairy")) {
-        console.log("dairy included")
         let dairy_array = ["chocolate", "milk", "cheese", "yogurt", "butter", "cream"]
         food_intol_array = food_intol_array.concat(dairy_array)
     }
 
-    username = document.getElementById('username').value;
-    email = document.getElementById('email').value;
-    companyname = document.getElementById('company').value;
-    console.log("compan", companyname)
+    // Read from hidden inputs (pre-filled at login; may be empty — session already created server-side)
+    username    = document.getElementById('username')   ? document.getElementById('username').value   : '';
+    email       = document.getElementById('email')      ? document.getElementById('email').value      : '';
+    companyname = document.getElementById('company')    ? document.getElementById('company').value    : '';
 
-    let displayname = document.getElementById('displayname')
-    let company = document.getElementById('companyName')
-    displayname.innerText = username
-    company.innerText = companyname
-
-    // Check if any field is empty  
-    if (!username || !email || !companyname) {
-        alert('Please fill all the fields');
-        return;
-    }
+    var displayname = document.getElementById('displayname');
+    var company     = document.getElementById('companyName');
+    if (displayname) displayname.innerText = username;
+    if (company)     company.innerText     = companyname;
 
     var data = {
-        username: username,
-        email: email,
+        username:    username,
+        email:       email,
         companyname: companyname,
         intolerance: food_intol_array,
-        user_id: uuid,
+        user_id:     uuid,
     };
-
 
     captureAndSendFrame();
 
     fetch('/startProcessing', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-    }).then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTPs error! status: ${response.status}`);
-        }
-        // If you want to do something with the response, you can do it here  
-    }).catch(e => {
-        console.log('There was a problem with the fetch operation: ' + e.message);
+    }).then(function(response) {
+        if (!response.ok) throw new Error('HTTP error: ' + response.status);
+    }).catch(function(e) {
+        console.log('startProcessing fetch error: ' + e.message);
     });
-
-    // window.location.href = "/process_page";  
-
-    var firstPage = document.getElementById('register_photo_begin')
-    var secondPage_1 = document.getElementById('recording')
-    var secondPage_2 = document.getElementById('footer_slide')
-    var secondPage_3 = document.getElementById('register_photo_process')
-
-    firstPage.style.display = "none"
-    secondPage_1.style.display = "block"
-    secondPage_2.style.display = "flex"
-    secondPage_3.style.display = "flex"
-    fetchWeatherData();
-    updateTime();
 }
 
 function stopProcessing() {
@@ -254,10 +224,8 @@ function connect() {
     let socket = new WebSocket(`wss://${window.location.host}/chill_results?token=${uuid}`);
     socket.onopen = function (event) {
         console.log('WebSocket connection established');
-        food_intol_array = []
-        startStream();
-
-
+        food_intol_array = [];
+        // Do NOT auto-start camera here — wait for user to click Start Camera
     };
     socket.onmessage = async function (event) {
         // console.log("WebSocket message received")
@@ -576,11 +544,20 @@ function captureAndSendFrame() {
 }
 
 function sendFrameToBackend(frame) {
-    // Remove the data:image/jpeg;base64, part from the Data URL
-    const base64Data = frame.replace('data:image/jpeg;base64,', '');
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
+    // Safely strip the data-URL prefix (works for any MIME type)
+    const parts = frame.split(',');
+    if (parts.length < 2 || !parts[1]) return;  // guard: empty/invalid frame
+    const base64Data = parts[1];
 
+    let byteCharacters;
+    try {
+        byteCharacters = atob(base64Data);
+    } catch(e) {
+        console.warn('sendFrameToBackend: invalid base64, skipping frame.', e);
+        return;
+    }
+
+    const byteNumbers = new Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
@@ -596,7 +573,6 @@ function sendFrameToBackend(frame) {
         body: formData
     }).then(response => {
         // Handle the response from the server
-        // console.log(response)
     }).catch(error => {
         console.error('Error:', error);
     });
