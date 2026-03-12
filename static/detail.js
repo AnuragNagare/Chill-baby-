@@ -238,23 +238,12 @@ function connect() {
             console.log(txt[1])
         }
         else if (txt[0] === "foodrect") {
-            foodrect.style.display = 'block'
-            // var x1 = parseFloat(txt[1]);
-            // var y1 = parseFloat(txt[2]);
-            // var x2 = parseFloat(txt[3]);
-            // var y2 = parseFloat(txt[4]);
-            // var x1 = 0  
-            // var y1 = video.videoHeight * 0.7
-            // var x2 = video.videoWidth * 0.5;  
-            // var y2 = video.videoHeight * 0.15;  
-            // console.log("food rect-------------", x1, y1, x2, y2)
+            // foodrect box intentionally hidden – only face bounding box is shown
+            // foodrect.style.display = 'block'
             foodrect.style.left = '10%';
             foodrect.style.top = '78%';
             foodrect.style.width = '40%';
             foodrect.style.height = '20%';
-
-
-
         }
         else if (txt[0] === "endRec") {
             console.log("recording ended")

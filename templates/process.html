@@ -338,9 +338,6 @@
 
       <!-- status badges -->
       <div class="cam-badges">
-        <div class="cam-badge green" id="badgeChild">
-          <span class="dot"></span> Child Present
-        </div>
         <div class="cam-badge teal" id="badgeTracking">
           <span class="dot"></span> Tracking Active
         </div>
@@ -646,16 +643,7 @@
     }).observe(audioEl, { childList: true, subtree: true, characterData: true });
   }
 
-  // ── Child badge toggle ─────────────────────────────────────────────
-  var childWarningEl = document.getElementById('warningchild');
-  var badgeChild     = document.getElementById('badgeChild');
-  if (childWarningEl) {
-    new MutationObserver(function() {
-      var visible = childWarningEl.style.display !== 'none';
-      badgeChild.className = 'cam-badge ' + (visible ? 'red' : 'green');
-      badgeChild.querySelector('span').nextSibling.textContent = visible ? ' Child Missing' : ' Child Present';
-    }).observe(childWarningEl, { attributes: true });
-  }
+
 
   // ── Camera button handlers ────────────────────────────────────────────
   function handleStartCamera() {
@@ -770,7 +758,8 @@
       return (b.detection.box.area > a.detection.box.area) ? b : a;
     });
 
-    // Draw bounding boxes for ALL detected faces
+    // Draw bounding box for the BEST (largest) face only
+    detections = [best];
     detections.forEach(function(det) {
       var b = det.detection.box;
 

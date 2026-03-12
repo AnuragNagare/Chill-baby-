@@ -115,7 +115,7 @@ if __name__ == "__main__":
     parser.add_argument("--cert-file", default="cert.pem")
     parser.add_argument("--key-file",  default="key.pem")
     parser.add_argument("--host",      default="0.0.0.0")
-    parser.add_argument("--port",      type=int, default=8080)
+    parser.add_argument("--port",      type=int, default=5000)
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
