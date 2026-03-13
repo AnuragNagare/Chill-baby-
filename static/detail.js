@@ -569,6 +569,7 @@ function sendFrameToBackend(frame) {
 
 
 function stopStream() {
+    if (!pc) return;
     if (pc.getTransceivers) {
         pc.getTransceivers().forEach(function (transceiver) {
             if (transceiver.stop) {
@@ -743,9 +744,11 @@ function negotiate() {
     }).then(function (response) {
         return response.json();
     }).then(function (answer) {
-        return pc.setRemoteDescription(answer);
+        if (pc && pc.signalingState !== 'closed') {
+            return pc.setRemoteDescription(answer);
+        }
     }).catch(function (e) {
-        alert(e);
+        if (pc && pc.signalingState !== 'closed') alert(e);
     });
 }
 
