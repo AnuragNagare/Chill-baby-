@@ -723,9 +723,15 @@
     var canvas = document.getElementById('faceCanvas');
     if (!video || video.readyState < 2) return;
 
-    // keep canvas size in sync with displayed video
-    canvas.width  = video.videoWidth  || video.offsetWidth;
-    canvas.height = video.videoHeight || video.offsetHeight;
+    // Use face-api's matchDimensions + resizeResults for correct coordinate mapping.
+    // Detections are in video pixel space; canvas must match display size.
+    var displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+    if (typeof faceapi.matchDimensions === 'function') {
+      faceapi.matchDimensions(canvas, displaySize);
+    } else {
+      canvas.width  = displaySize.width;
+      canvas.height = displaySize.height;
+    }
 
     var opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.40 });
     var detections;
@@ -746,57 +752,63 @@
       return;
     }
 
-    // Scale factor: face-api coords are in video-pixel space,
-    // canvas is CSS-sized – use the CSS display size.
-    var displayW = video.offsetWidth;
-    var displayH = video.offsetHeight;
-    var scaleX   = displayW  / (video.videoWidth  || displayW);
-    var scaleY   = displayH / (video.videoHeight || displayH);
+    // Resize detections to display/canvas coordinate space
+    var resizedDetections;
+    if (typeof faceapi.resizeResults === 'function') {
+      resizedDetections = faceapi.resizeResults(detections, displaySize);
+    } else {
+      // Manual fallback: scale from video pixel space to display space
+      var vw = video.videoWidth || 1, vh = video.videoHeight || 1;
+      var scaleX = displaySize.width / vw, scaleY = displaySize.height / vh;
+      resizedDetections = detections.map(function(d) {
+        var b = d.detection.box;
+        var w = b.width * scaleX, h = b.height * scaleY;
+        return {
+          detection: { box: { x: b.x * scaleX, y: b.y * scaleY, width: w, height: h, area: w * h } },
+          age: d.age, gender: d.gender, genderProbability: d.genderProbability
+        };
+      });
+    }
 
     // Pick the largest (most prominent) face
-    var best = detections.reduce(function(a, b) {
+    var best = resizedDetections.reduce(function(a, b) {
       return (b.detection.box.area > a.detection.box.area) ? b : a;
     });
 
     // Draw bounding box for the BEST (largest) face only
-    detections = [best];
-    detections.forEach(function(det) {
-      var b = det.detection.box;
+    var det = best;
+    var b = det.detection.box;
 
-      // ── Build a SQUARE box that covers the full face ──
-      // 1. Start from face-api's detected rectangle (usually eye region)
-      // 2. Expand upward generously (50% of height) for forehead/hair
-      // 3. Expand sides (20%) and chin (15%)
-      // 4. Make it square by using the larger of expanded w/h
+    // ── Build a SQUARE box that covers the full face ──
+    // Reduced padding for better alignment (especially infants): TinyFaceDetector
+    // often returns a tight box; excessive expansion caused misalignment.
+    var padX    = b.width  * 0.12;   // modest extra on sides
+    var padYTop = b.height * 0.25;   // reduced: was 0.55, caused box to shift up
+    var padYBot = b.height * 0.15;   // modest below for chin
 
-      var padX    = b.width  * 0.20;   // extra on each side
-      var padYTop = b.height * 0.55;   // extra above (forehead)
-      var padYBot = b.height * 0.20;   // extra below (chin/neck)
+    var rx = b.x - padX;
+    var ry = b.y - padYTop;
+    var rw = b.width  + padX * 2;
+    var rh = b.height + padYTop + padYBot;
 
-      // Expanded rectangle in video-pixel space
-      var rx = b.x - padX;
-      var ry = b.y - padYTop;
-      var rw = b.width  + padX * 2;
-      var rh = b.height + padYTop + padYBot;
+    var side = Math.max(rw, rh);
+    var cx   = rx + rw / 2;
+    var cy   = ry + rh / 2;
+    var sx   = cx - side / 2;
+    var sy   = cy - side / 2;
 
-      // Force square: use the largest dimension, centered
-      var side = Math.max(rw, rh);
-      var cx   = rx + rw / 2;
-      var cy   = ry + rh / 2;
-      var sx   = cx - side / 2;
-      var sy   = cy - side / 2;
+    // Coordinates are already in canvas/display space
+    var bx = sx;
+    var by = sy;
+    var bs = side;
 
-      // Map to canvas (CSS) coordinates
-      var bx = sx * scaleX;
-      var by = sy * scaleY;
-      var bs = side * Math.min(scaleX, scaleY);  // square side in canvas px
+    // Clamp so box never overflows canvas
+    if (bx < 0) { bs += bx; bx = 0; }
+    if (by < 0) { bs += by; by = 0; }
+    if (bx + bs > canvas.width)  bs = Math.max(0, canvas.width  - bx);
+    if (by + bs > canvas.height) bs = Math.max(0, canvas.height - by);
 
-      // Clamp so box never overflows canvas
-      if (bx < 0) bx = 0;
-      if (by < 0) by = 0;
-      if (bx + bs > canvas.width)  bs = canvas.width  - bx;
-      if (by + bs > canvas.height) bs = canvas.height - by;
-
+    if (bs > 0) {
       // Outer glow ring
       ctx.strokeStyle = 'rgba(94,196,188,0.35)';
       ctx.lineWidth   = 10;
@@ -811,15 +823,11 @@
       var cs = bs * 0.14;
       ctx.strokeStyle = '#fff';
       ctx.lineWidth   = 3;
-      // top-left
       ctx.beginPath(); ctx.moveTo(bx, by + cs); ctx.lineTo(bx, by); ctx.lineTo(bx + cs, by); ctx.stroke();
-      // top-right
       ctx.beginPath(); ctx.moveTo(bx + bs - cs, by); ctx.lineTo(bx + bs, by); ctx.lineTo(bx + bs, by + cs); ctx.stroke();
-      // bottom-left
       ctx.beginPath(); ctx.moveTo(bx, by + bs - cs); ctx.lineTo(bx, by + bs); ctx.lineTo(bx + cs, by + bs); ctx.stroke();
-      // bottom-right
       ctx.beginPath(); ctx.moveTo(bx + bs - cs, by + bs); ctx.lineTo(bx + bs, by + bs); ctx.lineTo(bx + bs, by + bs - cs); ctx.stroke();
-    });
+    }
 
     // Update panel with best face data
     var age    = Math.round(best.age);
@@ -829,7 +837,7 @@
 
     document.getElementById('faceGender').innerText = gender + ' (' + genderConf + '% conf)';
     document.getElementById('faceAge').innerText    = '~' + age + ' yrs';
-    document.getElementById('faceStatusSub').innerText = detections.length + (detections.length === 1 ? ' face' : ' faces') + ' detected';
+    document.getElementById('faceStatusSub').innerText = resizedDetections.length + (resizedDetections.length === 1 ? ' face' : ' faces') + ' detected';
     updateChildBadge(isChild, age);
   }
 

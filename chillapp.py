@@ -78,8 +78,11 @@ async def login_post(request: web.Request) -> web.Response:
 
 
 # GET /process → main detection screen (camera opens here)
+# Redirect to login if no session (user landed here directly or after restart)
 @aiohttp_jinja2.template('process.html')
 async def process_get(request):
+    if not globalvars.get("insertedId"):
+        raise web.HTTPFound('/')
     return {'alert_msg': ''}
 
 
