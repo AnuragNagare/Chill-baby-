@@ -171,10 +171,6 @@
       background: linear-gradient(135deg, #ffb3b3, #ff6b6b);
       color: #fff; box-shadow: 0 4px 16px rgba(255,107,107,0.35);
     }
-    .cam-btn.upload {
-      background: linear-gradient(135deg, #a8c8ff, #6b9fff);
-      color: #fff; box-shadow: 0 4px 16px rgba(107,159,255,0.35);
-    }
 
     /* ── FOOD FOOTER STRIP ─────────────────────────────────────────────── */
     .food-strip {
@@ -337,9 +333,6 @@
     <!-- Camera feed -->
     <div class="camera-card" style="position:relative;">
       <video id="webcam" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block;"></video>
-      <!-- Uploaded image (shown when user uploads, hidden by default) -->
-      <img id="uploadedImage" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;" alt="Uploaded">
-      <input type="file" id="imageUpload" accept="image/*" style="display:none;">
       <!-- Face detection bounding box canvas -->
       <canvas id="faceCanvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
 
@@ -366,16 +359,13 @@
       <div id="warningaudio">🤧 <span id="audioAlertText">Cough detected!</span></div>
     </div>
 
-    <!-- Start / Stop / Upload buttons -->
+    <!-- Start / Stop buttons -->
     <div class="cam-buttons">
       <button class="cam-btn start" id="startCamBtn" onclick="handleStartCamera()">
         📷 Start Camera
       </button>
       <button class="cam-btn stop" id="stopCamBtn" onclick="handleStopCamera()">
         📵 Stop Camera
-      </button>
-      <button class="cam-btn upload" id="uploadImgBtn" onclick="handleUploadImage()">
-        📤 Upload Image
       </button>
     </div>
 
@@ -657,20 +647,6 @@
 
   // ── Camera button handlers ────────────────────────────────────────────
   function handleStartCamera() {
-    // Exit upload mode: hide uploaded image, show video
-    var imgEl = document.getElementById('uploadedImage');
-    var vidEl = document.getElementById('webcam');
-    if (imgEl && imgEl.style.display !== 'none') {
-      imgEl.style.display = 'none';
-      imgEl.src = '';
-      if (vidEl) vidEl.style.display = 'block';
-      var canvas = document.getElementById('faceCanvas');
-      if (canvas) { var ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
-      resetChildBadge();
-      document.getElementById('faceGender').innerText = '—';
-      document.getElementById('faceAge').innerText = '—';
-      document.getElementById('faceStatusSub').innerText = 'Camera off';
-    }
     if (typeof startStream === 'function') startStream();
     if (typeof captureAndSendFrame === 'function') captureAndSendFrame();
     document.getElementById('badgeTracking').className = 'cam-badge teal';
@@ -687,68 +663,7 @@
       vid.srcObject = null;
     }
     stopFaceDetection();
-    // Clear uploaded image view if showing
-    var imgEl = document.getElementById('uploadedImage');
-    var vidEl = document.getElementById('webcam');
-    if (imgEl && imgEl.style.display !== 'none') {
-      imgEl.style.display = 'none';
-      imgEl.src = '';
-      if (vidEl) vidEl.style.display = 'block';
-      var canvas = document.getElementById('faceCanvas');
-      if (canvas) { var ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
-      resetChildBadge();
-      document.getElementById('faceGender').innerText = '—';
-      document.getElementById('faceAge').innerText = '—';
-      document.getElementById('faceStatusSub').innerText = 'Camera off';
-    }
   }
-
-  function handleUploadImage() {
-    // Open file picker first so user gets immediate feedback
-    var inputEl = document.getElementById('imageUpload');
-    if (inputEl) inputEl.click();
-
-    // Stop live detection and camera when switching to upload mode
-    // Do NOT call stopProcessing() - it shows confetti/end session UI
-    if (faceDetectInterval) { clearInterval(faceDetectInterval); faceDetectInterval = null; }
-    var vid = document.getElementById('webcam');
-    var hadStream = vid && vid.srcObject;
-    if (hadStream) {
-      vid.srcObject.getTracks().forEach(function(t){ t.stop(); });
-      vid.srcObject = null;
-    }
-    if (typeof stopStream === 'function' && hadStream) {
-      try { stopStream(); } catch(e) { console.warn('stopStream:', e); }
-    }
-  }
-
-  // File input change: load image, display, run face detection
-  var imageUploadEl = document.getElementById('imageUpload');
-  if (imageUploadEl) imageUploadEl.addEventListener('change', async function(e) {
-    var file = e.target.files[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    e.target.value = '';
-
-    var imgEl = document.getElementById('uploadedImage');
-    var vidEl = document.getElementById('webcam');
-    if (!imgEl) return;
-
-    imgEl.style.display = 'block';
-    if (vidEl) vidEl.style.display = 'none';
-    var blobUrl = URL.createObjectURL(file);
-    imgEl.src = blobUrl;
-
-    imgEl.onload = async function() {
-      URL.revokeObjectURL(blobUrl);
-      document.getElementById('faceStatusSub').innerText = 'Analyzing…';
-      var ok = await loadFaceModels();
-      if (!ok) {
-        document.getElementById('faceStatusSub').innerText = 'Model load failed';
-        return;
-      }
-      await detectFaceFromImage(imgEl);
-    };
-  });
 
   // ── Live clock in cam meta ─────────────────────────────────────────
   function tickClock() {
@@ -809,8 +724,10 @@
     if (!video || video.readyState < 2) return;
 
     // Use face-api's matchDimensions + resizeResults for correct coordinate mapping.
-    // Detections are in video pixel space; canvas must match display size.
-    var displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+    // ManyCam/virtual cameras may report offsetWidth/offsetHeight as 0 initially – fallback to video dimensions.
+    var displayW = video.offsetWidth || video.videoWidth || 640;
+    var displayH = video.offsetHeight || video.videoHeight || 480;
+    var displaySize = { width: displayW, height: displayH };
     if (typeof faceapi.matchDimensions === 'function') {
       faceapi.matchDimensions(canvas, displaySize);
     } else {
@@ -918,110 +835,27 @@
     var age    = Math.round(best.age);
     var gender = best.gender.charAt(0).toUpperCase() + best.gender.slice(1);
     var genderConf = Math.round(best.genderProbability * 100);
-    var isChild = age <= 12;
+
+    // Infant heuristic: ageGenderNet is trained on adults and often misclassifies infants as 12–25 yrs.
+    // When face occupies a large share of the frame (baby close to camera), treat as infant.
+    var frameArea = canvas.width * canvas.height;
+    var faceArea  = b.width * b.height;
+    var faceRatio = frameArea > 0 ? faceArea / frameArea : 0;
+    var likelyInfant = faceRatio > 0.05 && age >= 12 && age <= 30;
+
+    var isChild = age <= 12 || likelyInfant;
+    var displayAge = (likelyInfant ? '≤ 3 yrs (infant)' : '~' + age + ' yrs');
 
     document.getElementById('faceGender').innerText = gender + ' (' + genderConf + '% conf)';
-    document.getElementById('faceAge').innerText    = '~' + age + ' yrs';
+    document.getElementById('faceAge').innerText    = displayAge;
     document.getElementById('faceStatusSub').innerText = resizedDetections.length + (resizedDetections.length === 1 ? ' face' : ' faces') + ' detected';
-    updateChildBadge(isChild, age);
+    updateChildBadge(isChild, age, likelyInfant);
   }
 
-  async function detectFaceFromImage(img) {
-    var canvas = document.getElementById('faceCanvas');
-    if (!img || !img.complete || !canvas) return;
-
-    var displaySize = { width: img.offsetWidth, height: img.offsetHeight };
-    if (typeof faceapi.matchDimensions === 'function') {
-      faceapi.matchDimensions(canvas, displaySize);
-    } else {
-      canvas.width  = displaySize.width;
-      canvas.height = displaySize.height;
-    }
-
-    var opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.40 });
-    var detections;
-    try {
-      detections = await faceapi.detectAllFaces(img, opts).withAgeAndGender();
-    } catch(e) {
-      document.getElementById('faceStatusSub').innerText = 'Detection failed';
-      return;
-    }
-
-    var ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (!detections || detections.length === 0) {
-      document.getElementById('faceGender').innerText = '—';
-      document.getElementById('faceAge').innerText = '—';
-      document.getElementById('faceStatusSub').innerText = 'No face detected';
-      resetChildBadge();
-      return;
-    }
-
-    var resizedDetections;
-    if (typeof faceapi.resizeResults === 'function') {
-      resizedDetections = faceapi.resizeResults(detections, displaySize);
-    } else {
-      var iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
-      var scaleX = displaySize.width / iw, scaleY = displaySize.height / ih;
-      resizedDetections = detections.map(function(d) {
-        var b = d.detection.box;
-        var w = b.width * scaleX, h = b.height * scaleY;
-        return {
-          detection: { box: { x: b.x * scaleX, y: b.y * scaleY, width: w, height: h, area: w * h } },
-          age: d.age, gender: d.gender, genderProbability: d.genderProbability
-        };
-      });
-    }
-
-    var best = resizedDetections.reduce(function(a, b) {
-      return (b.detection.box.area > a.detection.box.area) ? b : a;
-    });
-
-    var b = best.detection.box;
-    var padX = b.width * 0.12, padYTop = b.height * 0.25, padYBot = b.height * 0.15;
-    var rx = b.x - padX, ry = b.y - padYTop;
-    var rw = b.width + padX * 2, rh = b.height + padYTop + padYBot;
-    var side = Math.max(rw, rh), cx = rx + rw / 2, cy = ry + rh / 2;
-    var sx = cx - side / 2, sy = cy - side / 2;
-    var bx = sx, by = sy, bs = side;
-
-    if (bx < 0) { bs += bx; bx = 0; }
-    if (by < 0) { bs += by; by = 0; }
-    if (bx + bs > canvas.width)  bs = Math.max(0, canvas.width - bx);
-    if (by + bs > canvas.height) bs = Math.max(0, canvas.height - by);
-
-    if (bs > 0) {
-      ctx.strokeStyle = 'rgba(94,196,188,0.35)';
-      ctx.lineWidth = 10;
-      ctx.strokeRect(bx - 5, by - 5, bs + 10, bs + 10);
-      ctx.strokeStyle = '#5ec4bc';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(bx, by, bs, bs);
-      var cs = bs * 0.14;
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(bx, by + cs); ctx.lineTo(bx, by); ctx.lineTo(bx + cs, by); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(bx + bs - cs, by); ctx.lineTo(bx + bs, by); ctx.lineTo(bx + bs, by + cs); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(bx, by + bs - cs); ctx.lineTo(bx, by + bs); ctx.lineTo(bx + cs, by + bs); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(bx + bs - cs, by + bs); ctx.lineTo(bx + bs, by + bs); ctx.lineTo(bx + bs, by + bs - cs); ctx.stroke();
-    }
-
-    var age = Math.round(best.age);
-    var gender = best.gender.charAt(0).toUpperCase() + best.gender.slice(1);
-    var genderConf = Math.round(best.genderProbability * 100);
-    var isChild = age <= 12;
-
-    document.getElementById('faceGender').innerText = gender + ' (' + genderConf + '% conf)';
-    document.getElementById('faceAge').innerText = '~' + age + ' yrs';
-    document.getElementById('faceStatusSub').innerText = resizedDetections.length + (resizedDetections.length === 1 ? ' face' : ' faces') + ' detected';
-    updateChildBadge(isChild, age);
-  }
-
-  function updateChildBadge(isChild, age) {
+  function updateChildBadge(isChild, age, isInfant) {
     var badge = document.getElementById('childBadge');
     if (isChild) {
-      badge.innerText = '🧒 Child Detected (≤ 12 yrs)';
+      badge.innerText = (isInfant ? '🍼 Infant Detected (≤ 3 yrs)' : '🧒 Child Detected (≤ 12 yrs)');
       badge.style.background    = '#fff8e1';
       badge.style.borderColor   = '#ffe082';
       badge.style.color         = '#e6a800';
