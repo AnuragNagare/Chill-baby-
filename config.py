@@ -47,3 +47,12 @@ YAMNET_BUFFER_SECONDS   = 1.0            # accumulate this many seconds before c
 YAMNET_COUGH_CLASS_ID   = 370            # YAMNet class index for 'Cough'
 YAMNET_SNEEZE_CLASS_ID  = 411            # YAMNet class index for 'Sneeze'
 YAMNET_CONFIDENCE_THRESH = 0.30          # minimum score to raise an alert
+
+# ── Cough analysis: noise & severity ──────────────────────────────────────────
+COUGH_NOISE_GATE_RMS    = 0.01           # skip if RMS below this (too quiet)
+COUGH_SNR_MIN_DB       = 3.0             # skip if SNR below this (too noisy)
+COUGH_SEVERITY_MILD_RMS = 0.03           # RMS thresholds for severity
+COUGH_SEVERITY_MODERATE_RMS = 0.08
+COUGH_SEVERITY_SEVERE_RMS   = 0.15
+COUGH_BURST_WINDOW_SEC = 3.0             # window for counting paroxysmal coughs
+COUGH_BURST_COUNT_SEVERE = 4              # 4+ coughs in window → severe

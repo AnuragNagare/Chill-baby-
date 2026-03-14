@@ -439,10 +439,14 @@ function connect() {
                 var audioAlertText = document.getElementById("audioAlertText");
                 var emoji = data["event"] === "sneeze" ? "🤧" : "😷";
                 var label = data["event"].charAt(0).toUpperCase() + data["event"].slice(1);
-                audioAlertText.innerText = label + " detected!";
-                audioWarning.innerHTML = emoji + " <span id='audioAlertText'>" + label + " detected! (conf: " + data["confidence"] + ")</span>";
+                var severityText = data["severity"] ? " (" + data["severity"] + ")" : "";
+                audioAlertText.innerText = label + " detected!" + severityText;
+                audioWarning.innerHTML = emoji + " <span id='audioAlertText'>" + label + " detected!" + severityText + " (conf: " + data["confidence"] + ")</span>";
                 audioWarning.style.display = "block";
-                console.log("Audio event:", data["event"], "conf:", data["confidence"]);
+                // Severity-based styling: severe = red, moderate = orange, mild = amber
+                audioWarning.style.background = data["severity"] === "severe" ? "rgba(220,50,50,0.95)" :
+                    data["severity"] === "moderate" ? "rgba(255,140,0,0.93)" : "rgba(255,180,0,0.9)";
+                console.log("Audio event:", data["event"], "conf:", data["confidence"], "severity:", data["severity"]);
                 // Auto-dismiss after 5 seconds
                 setTimeout(function () {
                     audioWarning.style.display = "none";

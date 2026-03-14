@@ -678,6 +678,7 @@
   // ══ FACE DETECTION – bounding box + age/gender ═════════════════════════
   var faceDetectInterval = null;
   var faceModelsLoaded   = false;
+  var ageHistory = [];  // Smooth age over last N frames to reduce model jitter
 
   // Models are hosted on jsdelivr (same CDN as face-api.js)
   var MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
@@ -709,6 +710,7 @@
 
   function stopFaceDetection() {
     if (faceDetectInterval) { clearInterval(faceDetectInterval); faceDetectInterval = null; }
+    ageHistory = [];
     // clear canvas
     var canvas = document.getElementById('faceCanvas');
     if (canvas) { var ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
@@ -747,6 +749,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!detections || detections.length === 0) {
+      ageHistory = [];
       document.getElementById('faceGender').innerText = '—';
       document.getElementById('faceAge').innerText    = '—';
       document.getElementById('faceStatusSub').innerText = 'No face detected';
@@ -832,16 +835,22 @@
     }
 
     // Update panel with best face data
-    var age    = Math.round(best.age);
+    // Smooth age over last 5 frames to reduce face-api jitter (model can fluctuate ±4 yrs)
+    ageHistory.push(best.age);
+    if (ageHistory.length > 5) ageHistory.shift();
+    var avgAge = ageHistory.reduce(function(a,b){ return a+b; }, 0) / ageHistory.length;
+    var age    = Math.round(avgAge);
     var gender = best.gender.charAt(0).toUpperCase() + best.gender.slice(1);
     var genderConf = Math.round(best.genderProbability * 100);
 
     // Infant heuristic: ageGenderNet is trained on adults and often misclassifies infants as 12–25 yrs.
-    // When face occupies a large share of the frame (baby close to camera), treat as infant.
+    // When face occupies a LARGE share of the frame (baby held very close), treat as infant.
+    // IMPORTANT: Adults (18+) are never infants — ageGenderNet is more reliable for adults.
+    // Face ratio must be high (>0.2) — only true infants held close have such large faces.
     var frameArea = canvas.width * canvas.height;
     var faceArea  = b.width * b.height;
     var faceRatio = frameArea > 0 ? faceArea / frameArea : 0;
-    var likelyInfant = faceRatio > 0.05 && age >= 12 && age <= 30;
+    var likelyInfant = age < 18 && faceRatio > 0.2 && age >= 12 && age <= 17;
 
     var isChild = age <= 12 || likelyInfant;
     var displayAge = (likelyInfant ? '≤ 3 yrs (infant)' : '~' + age + ' yrs');

@@ -7,24 +7,25 @@ Receives raw audio frames from the WebRTC stream, buffers 1 second of audio,
 then runs YAMNet (Google's sound classifier) in a thread executor.
 
 Detected events:
-  cough  (YAMNet class 370)
+  cough  (YAMNet class 370) – with noise filtering and acoustic severity
   sneeze (YAMNet class 411)
 
 On detection:
-  - Broadcasts {"_state": 7, "event": "cough"|"sneeze", "confidence": 0.87}
-    to all connected WebSocket clients.
+  - Broadcasts {"_state": 7, "event": "cough"|"sneeze", "confidence": 0.87,
+                "severity": "mild"|"moderate"|"severe"}  (severity for cough only)
   - Inserts an alert_events document into MongoDB.
 
-YAMNet requires:
-  - Mono audio at 16 000 Hz
-  - Input shape: [num_samples]  (float32, range -1.0 to 1.0)
+Noise handling: spectral reduction, SNR gate, quiet gate.
+Cough severity: mild / moderate / severe from loudness, duration, burst count.
 
-Install: pip install tensorflow-hub
+Install: pip install tensorflow-hub noisereduce
 """
 
 import logging
 import asyncio
 import concurrent.futures
+import time
+from collections import deque
 from datetime import datetime
 
 import numpy as np
@@ -41,6 +42,14 @@ from config import (
     YAMNET_COUGH_CLASS_ID,
     YAMNET_SNEEZE_CLASS_ID,
     YAMNET_CONFIDENCE_THRESH,
+    COUGH_BURST_WINDOW_SEC,
+)
+from services.cough_analyzer import (
+    reduce_noise,
+    estimate_snr,
+    compute_acoustic_features,
+    estimate_cough_severity,
+    should_skip_due_to_noise,
 )
 
 logger   = logging.getLogger(__name__)
@@ -59,31 +68,62 @@ def get_yamnet():
 
 
 # ── Classification (runs in thread executor) ─────────────────────────────────
-def classify_audio(waveform: np.ndarray) -> tuple[str | None, float]:
-    """
-    Run YAMNet on a mono 16 kHz float32 waveform.
-
-    Returns
-    -------
-    (label, confidence)  where label is 'cough', 'sneeze', or None
-    """
-    model   = get_yamnet()
+def _yamnet_classify(waveform: np.ndarray) -> tuple[str | None, float]:
+    """Run YAMNet on waveform. Returns (label, confidence)."""
+    model = get_yamnet()
     waveform_tf = tf.constant(waveform, dtype=tf.float32)
     scores, _, _ = model(waveform_tf)   # scores shape: [frames, 521]
-
-    # Average across time frames → shape [521]
     mean_scores = tf.reduce_mean(scores, axis=0).numpy()
-
     cough_score  = float(mean_scores[YAMNET_COUGH_CLASS_ID])
     sneeze_score = float(mean_scores[YAMNET_SNEEZE_CLASS_ID])
-
     logger.debug("YAMNet — cough=%.3f sneeze=%.3f", cough_score, sneeze_score)
-
     if cough_score >= YAMNET_CONFIDENCE_THRESH and cough_score >= sneeze_score:
         return "cough", cough_score
     if sneeze_score >= YAMNET_CONFIDENCE_THRESH:
         return "sneeze", sneeze_score
     return None, 0.0
+
+
+def analyze_and_classify_audio(
+    waveform: np.ndarray,
+    sample_rate: int,
+    recent_cough_count: int = 0,
+) -> tuple[str | None, float, str | None]:
+    """
+    Full pipeline: noise reduction → SNR gate → YAMNet → cough severity.
+
+    Returns
+    -------
+    (label, confidence, severity)
+        label: 'cough', 'sneeze', or None
+        severity: 'mild'|'moderate'|'severe' for cough, None for sneeze
+    """
+    # 1. Noise reduction
+    cleaned = reduce_noise(waveform, sample_rate)
+
+    # 2. SNR check – skip if too noisy
+    snr_db = estimate_snr(cleaned)
+    skip, reason = should_skip_due_to_noise(cleaned, snr_db)
+    if skip:
+        logger.debug("Skipping audio: %s (SNR=%.1f dB)", reason, snr_db)
+        return None, 0.0, None
+
+    # 3. YAMNet classification
+    label, conf = _yamnet_classify(cleaned)
+    if not label:
+        return None, 0.0, None
+
+    # 4. Cough severity (cough only)
+    severity = None
+    if label == "cough":
+        features = compute_acoustic_features(cleaned)
+        severity = estimate_cough_severity(
+            features, sample_rate=sample_rate, recent_cough_count=recent_cough_count
+        )
+        logger.debug("Cough severity: %s (rms=%.4f, bursts=%d)",
+                     severity, features["rms"], features["burst_count"])
+
+    return label, conf, severity
 
 
 # ── Audio resampling helper ───────────────────────────────────────────────────
@@ -115,6 +155,7 @@ class AudioTransformTrack(MediaStreamTrack):
         self._buffer: list[np.ndarray] = []
         self._buffer_samples = 0
         self._target_samples = int(YAMNET_SAMPLE_RATE * YAMNET_BUFFER_SECONDS)
+        self._cough_times: deque[float] = deque(maxlen=20)  # for burst severity
 
         logger.info("AudioTransformTrack created for user=%s", user_id)
 
@@ -150,14 +191,28 @@ class AudioTransformTrack(MediaStreamTrack):
                 self._buffer       = []
                 self._buffer_samples = 0
 
-                loop  = asyncio.get_event_loop()
-                label, conf = await loop.run_in_executor(
-                    executor, classify_audio, waveform
+                # Count coughs in burst window for severity
+                now = time.time()
+                cutoff = now - COUGH_BURST_WINDOW_SEC
+                recent_count = sum(1 for t in self._cough_times if t > cutoff)
+
+                loop = asyncio.get_event_loop()
+                label, conf, severity = await loop.run_in_executor(
+                    executor,
+                    lambda: analyze_and_classify_audio(
+                        waveform, YAMNET_SAMPLE_RATE, recent_cough_count=recent_count
+                    ),
                 )
 
                 if label:
-                    logger.info("Audio event detected: %s (conf=%.2f) user=%s",
-                                label, conf, self.user_id)
+                    if label == "cough":
+                        self._cough_times.append(now)
+                    logger.info(
+                        "Audio event detected: %s (conf=%.2f%s) user=%s",
+                        label, conf,
+                        f" severity={severity}" if severity else "",
+                        self.user_id,
+                    )
 
                     # Broadcast to all WebSocket clients (_state 7)
                     payload = {
@@ -165,18 +220,21 @@ class AudioTransformTrack(MediaStreamTrack):
                         "event":      label,
                         "confidence": round(conf, 2),
                     }
+                    if severity:
+                        payload["severity"] = severity
                     for ws in self.connections.values():
                         await ws.send_json(payload)
 
                     # Persist to MongoDB alert_events
                     try:
-                        await db.alert_events().insert_one({
+                        doc = {
                             "session_id": self.session_id,
                             "timestamp":  datetime.utcnow(),
-                            "alert_type": label,          # "cough" or "sneeze"
+                            "alert_type": label,
                             "confidence": round(conf, 2),
-                            "metadata":   {},
-                        })
+                            "metadata":   {"severity": severity} if severity else {},
+                        }
+                        await db.alert_events().insert_one(doc)
                     except Exception:
                         logger.exception("Failed to log audio alert to MongoDB")
 
